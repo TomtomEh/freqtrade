@@ -64,8 +64,8 @@ class Backtesting:
 
         self.exchange = ExchangeResolver.load_exchange(self.config['exchange']['name'], self.config)
 
-        dataprovider = DataProvider(self.config, self.exchange)
-        IStrategy.dp = dataprovider
+        self.dataprovider = DataProvider(self.config, self.exchange)
+        IStrategy.dp = self.dataprovider
 
         if self.config.get('strategy_list', None):
             for strat in list(self.config['strategy_list']):
@@ -96,7 +96,7 @@ class Backtesting:
                 "PrecisionFilter not allowed for backtesting multiple strategies."
             )
 
-        dataprovider.add_pairlisthandler(self.pairlists)
+        self.dataprovider.add_pairlisthandler(self.pairlists)
         self.pairlists.refresh_pairlist()
 
         if len(self.pairlists.whitelist) == 0:
@@ -176,6 +176,7 @@ class Backtesting:
         Trade.use_db = False
         PairLocks.reset_locks()
         Trade.reset_trades()
+        self.dataprovider.clear_cache()
 
     def _get_ohlcv_as_lists(self, processed: Dict[str, DataFrame]) -> Dict[str, Tuple]:
         """
@@ -247,10 +248,9 @@ class Backtesting:
         else:
             return sell_row[OPEN_IDX]
 
-    def _get_sell_trade_entry(self, dataframe: DataFrame, trade: LocalTrade,
-                              sell_row: Tuple) -> Optional[LocalTrade]:
+    def _get_sell_trade_entry(self, trade: LocalTrade, sell_row: Tuple) -> Optional[LocalTrade]:
 
-        sell = self.strategy.should_sell(dataframe, trade, sell_row[OPEN_IDX],  # type: ignore
+        sell = self.strategy.should_sell(trade, sell_row[OPEN_IDX],  # type: ignore
                                          sell_row[DATE_IDX].to_pydatetime(), sell_row[BUY_IDX],
                                          sell_row[SELL_IDX],
                                          low=sell_row[LOW_IDX], high=sell_row[HIGH_IDX])
@@ -267,7 +267,8 @@ class Backtesting:
                     pair=trade.pair, trade=trade, order_type='limit', amount=trade.amount,
                     rate=closerate,
                     time_in_force=time_in_force,
-                    sell_reason=sell.sell_reason):
+                    sell_reason=sell.sell_reason,
+                    current_time=sell_row[DATE_IDX].to_pydatetime()):
                 return None
 
             trade.close(closerate, show_msg=False)
@@ -287,7 +288,7 @@ class Backtesting:
         # Confirm trade entry:
         if not strategy_safe_wrapper(self.strategy.confirm_trade_entry, default_retval=True)(
                 pair=pair, order_type=order_type, amount=stake_amount, rate=row[OPEN_IDX],
-                time_in_force=time_in_force):
+                time_in_force=time_in_force, current_time=row[DATE_IDX].to_pydatetime()):
             return None
 
         if stake_amount and (not min_stake_amount or stake_amount > min_stake_amount):
@@ -349,6 +350,11 @@ class Backtesting:
         trades: List[LocalTrade] = []
         self.prepare_backtest(enable_protections)
 
+        # Update dataprovider cache
+        for pair, dataframe in processed.items():
+            self.dataprovider._set_cached_df(pair, self.timeframe, dataframe)
+        self.strategy.dp = self.dataprovider
+
         # Use dict of lists with data for performance
         # (looping lists is a lot faster than pandas DataFrames)
         data: Dict = self._get_ohlcv_as_lists(processed)
@@ -398,7 +404,7 @@ class Backtesting:
 
                 for trade in open_trades[pair]:
                     # also check the buying candle for sell conditions.
-                    trade_entry = self._get_sell_trade_entry(processed[pair], trade, row)
+                    trade_entry = self._get_sell_trade_entry(trade, row)
                     # Sell occured
                     if trade_entry:
                         # logger.debug(f"{pair} - Backtesting sell {trade}")
