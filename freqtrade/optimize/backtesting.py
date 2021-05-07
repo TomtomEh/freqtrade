@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from pandas import DataFrame
+from pandas import DataFrame, NaT
 
 from freqtrade.configuration import TimeRange, remove_credentials, validate_config_consistency
 from freqtrade.constants import DATETIME_PRINT_FORMAT
@@ -159,7 +159,7 @@ class Backtesting:
 
         logger.info(f'Loading data from {min_date.strftime(DATETIME_PRINT_FORMAT)} '
                     f'up to {max_date.strftime(DATETIME_PRINT_FORMAT)} '
-                    f'({(max_date - min_date).days} days)..')
+                    f'({(max_date - min_date).days} days).')
 
         # Adjust startts forward if not enough data is available
         timerange.adjust_start_if_necessary(timeframe_to_seconds(self.timeframe),
@@ -331,7 +331,7 @@ class Backtesting:
     def backtest(self, processed: Dict,
                  start_date: datetime, end_date: datetime,
                  max_open_trades: int = 0, position_stacking: bool = False,
-                 enable_protections: bool = False) -> DataFrame:
+                 enable_protections: bool = False) -> Dict[str, Any]:
         """
         Implement backtesting functionality
 
@@ -423,7 +423,13 @@ class Backtesting:
         trades += self.handle_left_open(open_trades, data=data)
         self.wallets.update()
 
-        return trade_list_to_dataframe(trades)
+        results = trade_list_to_dataframe(trades)
+        return {
+            'results': results,
+            'config': self.strategy.config,
+            'locks': PairLocks.get_all_locks(),
+            'final_balance': self.wallets.get_total(self.strategy.config['stake_currency']),
+        }
 
     def backtest_one_strategy(self, strat: IStrategy, data: Dict[str, Any], timerange: TimeRange):
         logger.info("Running backtesting for Strategy %s", strat.get_strategy_name())
@@ -449,28 +455,28 @@ class Backtesting:
             preprocessed[pair] = trim_dataframe(df, timerange,
                                                 startup_candles=self.required_startup)
         min_date, max_date = history.get_timerange(preprocessed)
-
+        if min_date is NaT or max_date is NaT:
+            raise OperationalException(
+                "No data left after adjusting for startup candles. ")
         logger.info(f'Backtesting with data from {min_date.strftime(DATETIME_PRINT_FORMAT)} '
                     f'up to {max_date.strftime(DATETIME_PRINT_FORMAT)} '
-                    f'({(max_date - min_date).days} days)..')
+                    f'({(max_date - min_date).days} days).')
         # Execute backtest and store results
         results = self.backtest(
             processed=preprocessed,
-            start_date=min_date.datetime,
-            end_date=max_date.datetime,
+            start_date=min_date,
+            end_date=max_date,
             max_open_trades=max_open_trades,
             position_stacking=self.config.get('position_stacking', False),
             enable_protections=self.config.get('enable_protections', False),
         )
         backtest_end_time = datetime.now(timezone.utc)
-        self.all_results[self.strategy.get_strategy_name()] = {
-            'results': results,
-            'config': self.strategy.config,
-            'locks': PairLocks.get_all_locks(),
-            'final_balance': self.wallets.get_total(self.strategy.config['stake_currency']),
+        results.update({
             'backtest_start_time': int(backtest_start_time.timestamp()),
             'backtest_end_time': int(backtest_end_time.timestamp()),
-        }
+        })
+        self.all_results[self.strategy.get_strategy_name()] = results
+
         return min_date, max_date
 
     def start(self) -> None:

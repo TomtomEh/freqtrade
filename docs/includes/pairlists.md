@@ -210,7 +210,7 @@ If using `BUSD` as stacking currency it can be usefull to filter out some pairs 
 
 ### Full example of Pairlist Handlers
 
-The below example blacklists `BNB/BTC`, uses `VolumePairList` with `20` assets, sorting pairs by `quoteVolume` and applies [`PrecisionFilter`](#precisionfilter) and [`PriceFilter`](#price-filter), filtering all assets where 1 price unit is > 1%. Then the [`SpreadFilter`](#spreadfilter) and [`VolatilityFilter`](#volatilityfilter) is applied and pairs are finally shuffled with the random seed set to some predefined value.
+The below example blacklists `BNB/BTC`, uses `VolumePairList` with `20` assets, sorting pairs by `quoteVolume` and applies [`PrecisionFilter`](#precisionfilter) and [`PriceFilter`](#pricefilter), filtering all assets where 1 price unit is > 1%. Then the [`SpreadFilter`](#spreadfilter) and [`VolatilityFilter`](#volatilityfilter) is applied and pairs are finally shuffled with the random seed set to some predefined value.
 
 ```json
 "exchange": {
