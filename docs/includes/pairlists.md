@@ -30,6 +30,8 @@ You may also use something like `.*DOWN/BTC` or `.*UP/BTC` to exclude leveraged 
 * [`SpreadFilter`](#spreadfilter)
 * [`RangeStabilityFilter`](#rangestabilityfilter)
 * [`VolatilityFilter`](#volatilityfilter)
+* [`CurrencyFilter`](#currencyfilter)
+
 
 !!! Tip "Testing pairlists"
     Pairlist configurations can be quite tricky to get right. Best use the [`test-pairlist`](utils.md#test-pairlist) utility sub-command to test your configuration quickly.
@@ -187,6 +189,21 @@ If the volatility over the last 10 days is not in the range of 0.05-0.50, remove
         "min_volatility": 0.05,
         "max_volatility": 0.50,
         "refresh_period": 86400
+    }
+]
+```
+#### CurrencyFilter
+
+Removes pairs that are part of the current stacking currency but that are not part of the marked of a second currency.
+
+Example:
+
+If using `BUSD` as stacking currency it can be usefull to filter out some pairs that are not part of the `USDT` market and avoid unstable coins..
+```json
+"pairlists": [
+    {
+        "method": "CurrencyFilter",
+        "currency": "USDT",
     }
 ]
 ```
