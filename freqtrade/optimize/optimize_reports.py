@@ -51,9 +51,9 @@ def _get_line_header(first_column: str, stake_currency: str) -> List[str]:
     """
     Generate header lines (goes in line with _generate_result_line())
     """
-    return [first_column, 'Buys', 'Avg Profit %', 'Cum Profit %',
-            f'Tot Profit {stake_currency}', 'Tot Profit %', 'Avg Duration',
-            'Wins', 'Draws', 'Losses']
+    return [first_column, 'Buys', 'Avg Prof %', 'Cum Prof %',
+            f'Tot Prof{stake_currency}', 'Tot Prof %', 'Avg D',
+            'W', 'L']
 
 
 def _generate_result_line(result: DataFrame, starting_balance: int, first_column: str) -> Dict:
@@ -84,7 +84,6 @@ def _generate_result_line(result: DataFrame, starting_balance: int, first_column
         #                     minutes=round(result['trade_duration'].min()))
         #                     ) if not result.empty else '0:00',
         'wins': len(result[result['profit_abs'] > 0]),
-        'draws': len(result[result['profit_abs'] == 0]),
         'losses': len(result[result['profit_abs'] < 0]),
     }
 
@@ -393,7 +392,7 @@ def text_table_bt_results(pair_results: List[Dict[str, Any]], stake_currency: st
     floatfmt = _get_line_floatfmt(stake_currency)
     output = [[
         t['key'], t['trades'], t['profit_mean_pct'], t['profit_sum_pct'], t['profit_total_abs'],
-        t['profit_total_pct'], t['duration_avg'], t['wins'], t['draws'], t['losses']
+        t['profit_total_pct'], t['duration_avg'], t['wins'], t['losses']
     ] for t in pair_results]
     # Ignore type as floatfmt does allow tuples but mypy does not know that
     return tabulate(output, headers=headers,
@@ -441,7 +440,7 @@ def text_table_strategy(strategy_results, stake_currency: str) -> str:
 
     output = [[
         t['key'], t['trades'], t['profit_mean_pct'], t['profit_sum_pct'], t['profit_total_abs'],
-        t['profit_total_pct'], t['duration_avg'], t['wins'], t['draws'], t['losses']
+        t['profit_total_pct'], t['duration_avg'], t['wins'], t['losses']
     ] for t in strategy_results]
     # Ignore type as floatfmt does allow tuples but mypy does not know that
     return tabulate(output, headers=headers,
@@ -556,8 +555,23 @@ def show_backtest_results(config: Dict, backtest_stats: Dict):
 
     if len(backtest_stats['strategy']) > 1:
         # Print Strategy summary table
+        import json
+        import pandas as pd
+        #import debugpy
+        #debugpy.listen(5678)
+        #debugpy.wait_for_client()
+        #debugpy.breakpoint()
+        j=json.dumps(backtest_stats['strategy'], default = str) 
 
+        f=open("backtesting.json","w")
+        f.write(j)
+        #aa.sort_values(by='profit_total',ascending=False)
+        #aa=pd.read_json(j,orient='index')
+        #with open("e5n/backtesting.csv", 'a') as f:
+        #    aa.to_csv(f, header=f.tell()==0)
         table = text_table_strategy(backtest_stats['strategy_comparison'], stake_currency)
+        #f=open("comp.txt")
+        #f.write(table)
         print(' STRATEGY SUMMARY '.center(len(table.splitlines()[0]), '='))
         print(table)
         print('=' * len(table.splitlines()[0]))
