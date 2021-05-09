@@ -50,15 +50,15 @@ class CurrencyFilter(IPairList):
         :param tickers: Tickers (from exchange.get_tickers()). May be cached.
         :return: new allowlist
         """
-
         markets = self._exchange.markets
         result_pairlist = []
         
         for pair in pairlist:
             try:
                 self._exchange.get_valid_pair_combination(pair[:pair.find("/")],self._currency)
-            except ExchangeError:
                 result_pairlist.append(pair)
+
+            except ExchangeError:
                 self.log_once(f"Removed {pair} from whitelist, because it's not part "
                               f"of the {self._currency} market.", logger.info)
 

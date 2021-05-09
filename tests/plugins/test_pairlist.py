@@ -414,6 +414,9 @@ def test_VolumePairList_refresh_empty(mocker, markets_empty, whitelist_conf):
       {"method": "VolatilityFilter", "lookback_days": 3,
        "min_volatility": 0.002, "max_volatility": 0.004, "refresh_period": 1440}],
      "BTC", ['ETH/BTC', 'TKN/BTC'])
+     ([{"method": "StaticPairList"},
+      {"method": "CurrencyFilter", "currency": "USDT"}],
+     "BTC", ['ETH/BTC'])
 ])
 def test_VolumePairList_whitelist_gen(mocker, whitelist_conf, shitcoinmarkets, tickers,
                                       ohlcv_history, pairlists, base_currency,
