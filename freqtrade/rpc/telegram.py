@@ -363,11 +363,12 @@ class Telegram(RPCHandler):
             0.99 is used to make sure that there are no extra (empty) messages
             As an example with 50 trades, there will be int(50/50 + 0.99) = 1 message
             """
+            for a in statlist:
+                a[1]= '['+a[1]+'](https://www.binance.com/en/trade/'+a[1].replace("/","_")+')'
             for i in range(0, max(int(len(statlist) / max_trades_per_msg + 0.99), 1)):
                 message = tabulate(statlist[i * max_trades_per_msg:(i + 1) * max_trades_per_msg],
-                                   headers=head,
                                    tablefmt='simple')
-                self._send_msg(f"<pre>{message}</pre>", parse_mode=ParseMode.HTML)
+                self._send_msg(message, parse_mode=ParseMode.MARKDOWN)
         except RPCException as e:
             self._send_msg(str(e))
 
