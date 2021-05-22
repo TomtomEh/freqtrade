@@ -248,9 +248,42 @@ class Backtesting:
         else:
             return sell_row[OPEN_IDX]
 
+    def _get_ticker(self, price_path,ticker_time):
+        
+        i = 0
+        while ticker_time > 0:
+            ticker_time -= abs(price_path[i+1]-price_path[i])
+            i += 1
+        return price_path[i] - ticker_time
+    def candle_subsample(self, sell_row,num):
+        price_path=[sell_row[OPEN_IDX], sell_row[LOW_IDX],sell_row[HIGH_IDX]],sell_row[CLOSE_IDX]
+        if sell_row[OPEN_IDX] > sell_row[CLOSE_IDX] :
+                    price_path[1] = sell_row[HIGH_IDX]
+                    price_path[2] = sell_row[LOW_IDX]
+
+        candle_length = 0
+        for i in range(3):
+            candle_length += abs(price_path[i+1]-price_path[i])
+        ticker_times=np.sort(np.random.random_sample(num))*candle_length
+        res = []
+        for t in ticker_times:
+            res.append(self._get_ticker(price_path,t))
+        return res
     def _get_sell_trade_entry(self, trade: LocalTrade, sell_row: Tuple) -> Optional[LocalTrade]:
 
-        sell = self.strategy.should_sell(trade, sell_row[OPEN_IDX],  # type: ignore
+        num_subsample=0
+        if num_subsample = 0:
+            return self._get_sell_trade_entry_ticker(trade, sell_row,sell_row[OPEN_IDX])
+        rates = self.candle_subsample(sell_row,10)
+        for r in rates:
+            res = self._get_sell_trade_entry_ticker(trade, sell_row,r)
+            if res != None:
+                return res
+        return None
+
+    def _get_sell_trade_entry_ticker(self, trade: LocalTrade, sell_row: Tuple, rate) -> Optional[LocalTrade]:
+
+        sell = self.strategy.should_sell(trade, rate,  # type: ignore
                                          sell_row[DATE_IDX].to_pydatetime(), sell_row[BUY_IDX],
                                          sell_row[SELL_IDX],
                                          low=sell_row[LOW_IDX], high=sell_row[HIGH_IDX])
