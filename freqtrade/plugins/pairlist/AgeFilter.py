@@ -78,7 +78,7 @@ class AgeFilter(IPairList):
         """
         Validate age for the ticker
         :param pair: Pair that's currently validated
-        :param ticker: ticker dict as returned from ccxt.load_markets()
+        :param ticker: ticker dict as returned from ccxt.fetch_tickers()
         :return: True if the pair can stay, false if it should be removed
         """
         # Check symbol in cache
@@ -86,7 +86,7 @@ class AgeFilter(IPairList):
             return True
 
         if daily_candles is not None:
-            if len(daily_candles) > self._min_days_listed:
+            if len(daily_candles) >= self._min_days_listed:
                 # We have fetched at least the minimum required number of daily candles
                 # Add to cache, store the time we last checked this symbol
                 self._symbolsChecked[pair] = int(arrow.utcnow().float_timestamp) * 1000

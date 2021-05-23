@@ -8,13 +8,15 @@ import logging
 from datetime import timedelta
 from html import escape
 from itertools import chain
-from typing import Any, Callable, Dict, List, Union
+from math import isnan
+from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 import arrow
 from tabulate import tabulate
-from telegram import KeyboardButton, ParseMode, ReplyKeyboardMarkup, Update
+from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ParseMode,
+                      ReplyKeyboardMarkup, Update)
 from telegram.error import NetworkError, TelegramError
-from telegram.ext import CallbackContext, CommandHandler, Updater
+from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler, Updater
 from telegram.utils.helpers import escape_markdown
 
 from freqtrade.__init__ import __version__
@@ -87,7 +89,7 @@ class Telegram(RPCHandler):
         Validates the keyboard configuration from telegram config
         section.
         """
-        self._keyboard: List[List[Union[str, KeyboardButton]]] = [
+        self._keyboard: List[List[Union[str, KeyboardButton, InlineKeyboardButton]]] = [
             ['/daily', '/profit', '/balance'],
             ['/status', '/status table', '/performance'],
             ['/count', '/start', '/stop', '/help']
@@ -168,6 +170,11 @@ class Telegram(RPCHandler):
             'rpc.telegram is listening for following commands: %s',
             [h.command for h in handles]
         )
+
+        self._current_callback_query_handler: Optional[CallbackQueryHandler] = None
+        self._callback_query_handlers = {
+            'forcebuy': CallbackQueryHandler(self._forcebuy_inline)
+        }
 
     def cleanup(self) -> None:
         """
@@ -354,9 +361,11 @@ class Telegram(RPCHandler):
         :return: None
         """
         try:
-            statlist, head = self._rpc._rpc_status_table(
-                self._config['stake_currency'], self._config.get('fiat_display_currency', ''))
+            fiat_currency = self._config.get('fiat_display_currency', '')
+            statlist, head, fiat_profit_sum = self._rpc._rpc_status_table(
+                self._config['stake_currency'], fiat_currency)
 
+            show_total = not isnan(fiat_profit_sum) and len(statlist) > 1
             max_trades_per_msg = 50
             """
             Calculate the number of messages of 50 trades per message
@@ -625,6 +634,25 @@ class Telegram(RPCHandler):
         except RPCException as e:
             self._send_msg(str(e))
 
+    def _forcebuy_action(self, pair, price=None):
+        try:
+            self._rpc._rpc_forcebuy(pair, price)
+        except RPCException as e:
+            self._send_msg(str(e))
+
+    def _forcebuy_inline(self, update: Update, _: CallbackContext) -> None:
+        if update.callback_query:
+            query = update.callback_query
+            pair = query.data
+            query.answer()
+            query.edit_message_text(text=f"Force Buying: {pair}")
+            self._forcebuy_action(pair)
+
+    @staticmethod
+    def _layout_inline_keyboard(buttons: List[InlineKeyboardButton],
+                                cols=3) -> List[List[InlineKeyboardButton]]:
+        return [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
+
     @authorized_only
     def _forcebuy(self, update: Update, context: CallbackContext) -> None:
         """
@@ -637,10 +665,13 @@ class Telegram(RPCHandler):
         if context.args:
             pair = context.args[0]
             price = float(context.args[1]) if len(context.args) > 1 else None
-            try:
-                self._rpc._rpc_forcebuy(pair, price)
-            except RPCException as e:
-                self._send_msg(str(e))
+            self._forcebuy_action(pair, price)
+        else:
+            whitelist = self._rpc._rpc_whitelist()['whitelist']
+            pairs = [InlineKeyboardButton(pair, callback_data=pair) for pair in whitelist]
+            self._send_inline_msg("Which pair?",
+                                  keyboard=self._layout_inline_keyboard(pairs),
+                                  callback_query_handler='forcebuy')
 
     @authorized_only
     def _trades(self, update: Update, context: CallbackContext) -> None:
@@ -712,8 +743,11 @@ class Telegram(RPCHandler):
             trades = self._rpc._rpc_performance()
             output = "<b>Performance:</b>\n"
             for i, trade in enumerate(trades):
-                stat_line = (f"{i+1}.\t <code>{trade['pair']}\t{trade['profit']:.2f}% "
-                             f"({trade['count']})</code>\n")
+                stat_line = (
+                    f"{i+1}.\t <code>{trade['pair']}\t"
+                    f"{round_coin_value(trade['profit_abs'], self._config['stake_currency'])} "
+                    f"({trade['profit']:.2f}%) "
+                    f"({trade['count']})</code>\n")
 
                 if len(output + stat_line) >= MAX_TELEGRAM_MESSAGE_LENGTH:
                     self._send_msg(output, parse_mode=ParseMode.HTML)
@@ -752,6 +786,9 @@ class Telegram(RPCHandler):
         Returns the currently active locks
         """
         rpc_locks = self._rpc._rpc_locks()
+        if not rpc_locks['locks']:
+            self._send_msg('No active locks.', parse_mode=ParseMode.HTML)
+
         for locks in chunks(rpc_locks['locks'], 25):
             message = tabulate([[
                 lock['id'],
@@ -862,9 +899,17 @@ class Telegram(RPCHandler):
         """
         try:
             edge_pairs = self._rpc._rpc_edge()
-            edge_pairs_tab = tabulate(edge_pairs, headers='keys', tablefmt='simple')
-            message = f'<b>Edge only validated following pairs:</b>\n<pre>{edge_pairs_tab}</pre>'
-            self._send_msg(message, parse_mode=ParseMode.HTML)
+            if not edge_pairs:
+                message = '<b>Edge only validated following pairs:</b>'
+                self._send_msg(message, parse_mode=ParseMode.HTML)
+
+            for chunk in chunks(edge_pairs, 25):
+                edge_pairs_tab = tabulate(chunk, headers='keys', tablefmt='simple')
+                message = (f'<b>Edge only validated following pairs:</b>\n'
+                           f'<pre>{edge_pairs_tab}</pre>')
+
+                self._send_msg(message, parse_mode=ParseMode.HTML)
+
         except RPCException as e:
             self._send_msg(str(e))
 
@@ -961,8 +1006,9 @@ class Telegram(RPCHandler):
             f"*Current state:* `{val['state']}`"
         )
 
-    def _send_msg(self, msg: str, parse_mode: str = ParseMode.MARKDOWN,
-                  disable_notification: bool = False) -> None:
+    def _send_inline_msg(self, msg: str, callback_query_handler,
+                         parse_mode: str = ParseMode.MARKDOWN, disable_notification: bool = False,
+                         keyboard: List[List[InlineKeyboardButton]] = None, ) -> None:
         """
         Send given markdown message
         :param msg: message
@@ -970,7 +1016,29 @@ class Telegram(RPCHandler):
         :param parse_mode: telegram parse mode
         :return: None
         """
-        reply_markup = ReplyKeyboardMarkup(self._keyboard, resize_keyboard=True)
+        if self._current_callback_query_handler:
+            self._updater.dispatcher.remove_handler(self._current_callback_query_handler)
+        self._current_callback_query_handler = self._callback_query_handlers[callback_query_handler]
+        self._updater.dispatcher.add_handler(self._current_callback_query_handler)
+
+        self._send_msg(msg, parse_mode, disable_notification,
+                       cast(List[List[Union[str, KeyboardButton, InlineKeyboardButton]]], keyboard),
+                       reply_markup=InlineKeyboardMarkup)
+
+    def _send_msg(self, msg: str, parse_mode: str = ParseMode.MARKDOWN,
+                  disable_notification: bool = False,
+                  keyboard: List[List[Union[str, KeyboardButton, InlineKeyboardButton]]] = None,
+                  reply_markup=ReplyKeyboardMarkup) -> None:
+        """
+        Send given markdown message
+        :param msg: message
+        :param bot: alternative bot
+        :param parse_mode: telegram parse mode
+        :return: None
+        """
+        if keyboard is None:
+            keyboard = self._keyboard
+        reply_markup = reply_markup(keyboard, resize_keyboard=True)
         try:
             try:
                 self._updater.bot.send_message(

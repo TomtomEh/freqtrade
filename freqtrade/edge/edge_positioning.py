@@ -209,7 +209,7 @@ class Edge:
         if pair in self._cached_pairs:
             return self._cached_pairs[pair].stoploss
         else:
-            logger.warning('tried to access stoploss of a non-existing pair, '
+            logger.warning(f'Tried to access stoploss of non-existing pair {pair}, '
                            'strategy stoploss is returned instead.')
             return self.strategy.stoploss
 
@@ -240,7 +240,7 @@ class Edge:
 
         return self._final_pairs
 
-    def accepted_pairs(self) -> list:
+    def accepted_pairs(self) -> List[Dict[str, Any]]:
         """
         return a list of accepted pairs along with their winrate, expectancy and stoploss
         """

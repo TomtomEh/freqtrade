@@ -43,7 +43,7 @@ def _get_line_floatfmt(stake_currency: str) -> List[str]:
     Generate floatformat (goes in line with _generate_result_line())
     """
     return ['s', 'd', '.2f', '.2f', f'.{decimals_per_coin(stake_currency)}f',
-            '.2f', 'd', 'd', 'd', 'd']
+            '.2f', 'd', 's', 's']
 
 
 def _get_line_header(first_column: str, stake_currency: str) -> List[str]:
@@ -163,6 +163,17 @@ def generate_strategy_comparison(all_results: Dict) -> List[Dict]:
         tabular_data.append(_generate_result_line(
             results['results'], results['config']['dry_run_wallet'], strategy)
             )
+        try:
+            max_drawdown_per, _, _, _, _ = calculate_max_drawdown(results['results'],
+                                                                  value_col='profit_ratio')
+            max_drawdown_abs, _, _, _, _ = calculate_max_drawdown(results['results'],
+                                                                  value_col='profit_abs')
+        except ValueError:
+            max_drawdown_per = 0
+            max_drawdown_abs = 0
+        tabular_data[-1]['max_drawdown_per'] = round(max_drawdown_per * 100, 2)
+        tabular_data[-1]['max_drawdown_abs'] = \
+            round_coin_value(max_drawdown_abs, results['config']['stake_currency'], False)
     return tabular_data
 
 
@@ -207,6 +218,8 @@ def generate_trading_stats(results: DataFrame) -> Dict[str, Any]:
     winning_trades = results.loc[results['profit_ratio'] > 0]
     draw_trades = results.loc[results['profit_ratio'] == 0]
     losing_trades = results.loc[results['profit_ratio'] < 0]
+    zero_duration_trades = len(results.loc[(results['trade_duration'] == 0) &
+                                           (results['sell_reason'] == 'trailing_stop_loss')])
 
     return {
         'wins': len(winning_trades),
@@ -218,6 +231,7 @@ def generate_trading_stats(results: DataFrame) -> Dict[str, Any]:
                                if not winning_trades.empty else timedelta()),
         'loser_holding_avg': (timedelta(minutes=round(losing_trades['trade_duration'].mean()))
                               if not losing_trades.empty else timedelta()),
+        'zero_duration_trades': zero_duration_trades,
     }
 
 
@@ -312,9 +326,9 @@ def generate_strategy_stats(btdata: Dict[str, DataFrame],
         'profit_median': results['profit_ratio'].median() if len(results) > 0 else 0,
         'profit_total': results['profit_abs'].sum() / starting_balance,
         'profit_total_abs': results['profit_abs'].sum(),
-        'backtest_start': min_date,
+        'backtest_start': min_date.strftime(DATETIME_PRINT_FORMAT),
         'backtest_start_ts': int(min_date.timestamp() * 1000),
-        'backtest_end': max_date,
+        'backtest_end': max_date.strftime(DATETIME_PRINT_FORMAT),
         'backtest_end_ts': int(max_date.timestamp() * 1000),
         'backtest_days': backtest_days,
 
@@ -330,6 +344,7 @@ def generate_strategy_stats(btdata: Dict[str, DataFrame],
         'starting_balance': starting_balance,
         'dry_run_wallet': starting_balance,
         'final_balance': content['final_balance'],
+        'rejected_signals': content['rejected_signals'],
         'max_open_trades': max_open_trades,
         'max_open_trades_setting': (config['max_open_trades']
                                     if config['max_open_trades'] != float('inf') else -1),
@@ -361,9 +376,9 @@ def generate_strategy_stats(btdata: Dict[str, DataFrame],
         strat_stats.update({
             'max_drawdown': max_drawdown,
             'max_drawdown_abs': drawdown_abs,
-            'drawdown_start': drawdown_start,
+            'drawdown_start': drawdown_start.strftime(DATETIME_PRINT_FORMAT),
             'drawdown_start_ts': drawdown_start.timestamp() * 1000,
-            'drawdown_end': drawdown_end,
+            'drawdown_end': drawdown_end.strftime(DATETIME_PRINT_FORMAT),
             'drawdown_end_ts': drawdown_end.timestamp() * 1000,
 
             'max_drawdown_low': low_val,
@@ -453,9 +468,7 @@ def text_table_sell_reason(sell_reason_stats: List[Dict[str, Any]], stake_curren
     headers = [
         'Sell Reason',
         'Sells',
-        'Wins',
-        'Draws',
-        'Losses',
+        'Win  Draws  Loss  Win%',
         'Avg Profit %',
         'Cum Profit %',
         f'Tot Profit {stake_currency}',
@@ -463,7 +476,8 @@ def text_table_sell_reason(sell_reason_stats: List[Dict[str, Any]], stake_curren
     ]
 
     output = [[
-        t['sell_reason'], t['trades'], t['wins'], t['draws'], t['losses'],
+        t['sell_reason'], t['trades'],
+        _generate_wins_draws_losses(t['wins'], t['draws'], t['losses']),
         t['profit_mean_pct'], t['profit_sum_pct'],
         round_coin_value(t['profit_total_abs'], stake_currency, False),
         t['profit_total_pct'],
@@ -481,6 +495,16 @@ def text_table_strategy(strategy_results, stake_currency: str) -> str:
     """
     floatfmt = _get_line_floatfmt(stake_currency)
     headers = _get_line_header('Strategy', stake_currency)
+    # _get_line_header() is also used for per-pair summary. Per-pair drawdown is mostly useless
+    # therefore we slip this column in only for strategy summary here.
+    headers.append('Drawdown')
+
+    # Align drawdown string on the center two space separator.
+    drawdown = [f'{t["max_drawdown_per"]:.2f}' for t in strategy_results]
+    dd_pad_abs = max([len(t['max_drawdown_abs']) for t in strategy_results])
+    dd_pad_per = max([len(dd) for dd in drawdown])
+    drawdown = [f'{t["max_drawdown_abs"]:>{dd_pad_abs}} {stake_currency}  {dd:>{dd_pad_per}}%'
+                for t, dd in zip(strategy_results, drawdown)]
 
     output = [[
         t['key'], t['trades'], t['profit_mean_pct'], t['profit_sum_pct'], t['profit_total_abs'],
@@ -495,9 +519,21 @@ def text_table_add_metrics(strat_results: Dict) -> str:
     if len(strat_results['trades']) > 0:
         best_trade = max(strat_results['trades'], key=lambda x: x['profit_ratio'])
         worst_trade = min(strat_results['trades'], key=lambda x: x['profit_ratio'])
+
+        # Newly added fields should be ignored if they are missing in strat_results. hyperopt-show
+        # command stores these results and newer version of freqtrade must be able to handle old
+        # results with missing new fields.
+        zero_duration_trades = '--'
+
+        if 'zero_duration_trades' in strat_results:
+            zero_duration_trades_per = \
+                100.0 / strat_results['total_trades'] * strat_results['zero_duration_trades']
+            zero_duration_trades = f'{zero_duration_trades_per:.2f}% ' \
+                                   f'({strat_results["zero_duration_trades"]})'
+
         metrics = [
-            ('Backtesting from', strat_results['backtest_start'].strftime(DATETIME_PRINT_FORMAT)),
-            ('Backtesting to', strat_results['backtest_end'].strftime(DATETIME_PRINT_FORMAT)),
+            ('Backtesting from', strat_results['backtest_start']),
+            ('Backtesting to', strat_results['backtest_end']),
             ('Max open trades', strat_results['max_open_trades']),
             ('', ''),  # Empty line to improve readability
             ('Total trades', strat_results['total_trades']),
@@ -507,13 +543,12 @@ def text_table_add_metrics(strat_results: Dict) -> str:
                                                strat_results['stake_currency'])),
             ('Absolute profit ', round_coin_value(strat_results['profit_total_abs'],
                                                   strat_results['stake_currency'])),
-            ('Total profit %', f"{round(strat_results['profit_total'] * 100, 2)}%"),
+            ('Total profit %', f"{round(strat_results['profit_total'] * 100, 2):}%"),
             ('Trades per day', strat_results['trades_per_day']),
             ('Avg. stake amount', round_coin_value(strat_results['avg_stake_amount'],
                                                    strat_results['stake_currency'])),
             ('Total trade volume', round_coin_value(strat_results['total_volume'],
                                                     strat_results['stake_currency'])),
-
             ('', ''),  # Empty line to improve readability
             ('Best Pair', f"{strat_results['best_pair']['key']} "
                           f"{round(strat_results['best_pair']['profit_sum_pct'], 2)}%"),
@@ -531,6 +566,8 @@ def text_table_add_metrics(strat_results: Dict) -> str:
                 f"{strat_results['draw_days']} / {strat_results['losing_days']}"),
             ('Avg. Duration Winners', f"{strat_results['winner_holding_avg']}"),
             ('Avg. Duration Loser', f"{strat_results['loser_holding_avg']}"),
+            ('Zero Duration Trades', zero_duration_trades),
+            ('Rejected Buy signals', strat_results.get('rejected_signals', 'N/A')),
             ('', ''),  # Empty line to improve readability
 
             ('Min balance', round_coin_value(strat_results['csum_min'],
@@ -545,8 +582,8 @@ def text_table_add_metrics(strat_results: Dict) -> str:
                                                strat_results['stake_currency'])),
             ('Drawdown low', round_coin_value(strat_results['max_drawdown_low'],
                                               strat_results['stake_currency'])),
-            ('Drawdown Start', strat_results['drawdown_start'].strftime(DATETIME_PRINT_FORMAT)),
-            ('Drawdown End', strat_results['drawdown_end'].strftime(DATETIME_PRINT_FORMAT)),
+            ('Drawdown Start', strat_results['drawdown_start']),
+            ('Drawdown End', strat_results['drawdown_end']),
             ('Market change', f"{round(strat_results['market_change'] * 100, 2)}%"),
         ]
 
