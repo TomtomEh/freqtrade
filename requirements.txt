@@ -1,5 +1,7 @@
+<<<<<<< Updated upstream
 numpy==1.20.3
 pandas==1.2.4
+numpy==1.20.2
 
 ccxt==1.50.6
 # Pin cryptography for now due to rust build errors with piwheels

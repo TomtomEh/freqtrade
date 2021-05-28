@@ -605,7 +605,7 @@ class IStrategy(ABC, HyperStrategyMixin):
         # ROI (if not stoploss)
         # Sell-signal
         # Stoploss
-        if roi_reached and stoplossflag.sell_type != SellType.STOP_LOSS:
+        if roi_reached and stoplossflag.sell_type == SellType.NONE:
             logger.debug(f"{trade.pair} - Required profit reached. sell_type=SellType.ROI")
             return SellCheckTuple(sell_type=SellType.ROI)
 

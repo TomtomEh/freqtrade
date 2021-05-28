@@ -86,7 +86,6 @@ class FreqtradeBot(LoggingMixin):
         IStrategy.dp = self.dataprovider
         # Attach Wallets to Strategy baseclass
         IStrategy.wallets = self.wallets
-        self.strategy.rpc=self.rpc
 
 
         # Initializing Edge only if enabled
@@ -105,6 +104,7 @@ class FreqtradeBot(LoggingMixin):
         # the initial state of the bot.
         # Keep this at the end of this initialization method.
         self.rpc: RPCManager = RPCManager(self)
+        self.strategy.rpc=self.rpc
         # Protect sell-logic from forcesell and viceversa
         self._sell_lock = Lock()
         LoggingMixin.__init__(self, logger, timeframe_to_seconds(self.strategy.timeframe))
