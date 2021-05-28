@@ -86,6 +86,8 @@ class FreqtradeBot(LoggingMixin):
         IStrategy.dp = self.dataprovider
         # Attach Wallets to Strategy baseclass
         IStrategy.wallets = self.wallets
+        self.strategy.rpc=self.rpc
+
 
         # Initializing Edge only if enabled
         self.edge = Edge(self.config, self.exchange, self.strategy) if \
