@@ -1047,6 +1047,7 @@ class Telegram(RPCHandler):
                     parse_mode=parse_mode,
                     reply_markup=reply_markup,
                     disable_notification=disable_notification,
+                    disable_web_page_preview=True
                 )
             except NetworkError as network_err:
                 # Sometimes the telegram server resets the current connection,

@@ -4,14 +4,14 @@ Freqtrade is the main module of this bot. It contains the class Freqtrade()
 import copy
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from math import isclose
 from threading import Lock
 from typing import Any, Dict, List, Optional
-
+import time
 import arrow
 from cachetools import TTLCache
-
+from freqtrade.binanceStream import BinanceStream
 from freqtrade import __version__, constants
 from freqtrade.configuration import validate_config_consistency
 from freqtrade.data.converter import order_book_to_dataframe
@@ -48,7 +48,7 @@ class FreqtradeBot(LoggingMixin):
         :param config: configuration dict, you can use Configuration.get_config()
         to get the config dict.
         """
-
+        
         logger.info('Starting freqtrade %s', __version__)
 
         # Init bot state
@@ -60,6 +60,7 @@ class FreqtradeBot(LoggingMixin):
         # Cache values for 1800 to avoid frequent polling of the exchange for prices
         # Caching only applies to RPC methods, so prices for open trades are still
         # refreshed once every iteration.
+        self.last_time_updated_whitelist = datetime.now()- timedelta(minutes=60)
         self._sell_rate_cache: TTLCache = TTLCache(maxsize=100, ttl=1800)
         self._buy_rate_cache: TTLCache = TTLCache(maxsize=100, ttl=1800)
 
@@ -81,7 +82,7 @@ class FreqtradeBot(LoggingMixin):
         self.dataprovider = DataProvider(self.config, self.exchange, self.pairlists)
 
         self.protections = ProtectionManager(self.config)
-
+        self.strategy.set_ft(self)
         # Attach Dataprovider to Strategy baseclass
         IStrategy.dp = self.dataprovider
         # Attach Wallets to Strategy baseclass
@@ -158,19 +159,22 @@ class FreqtradeBot(LoggingMixin):
         # Check whether markets have to be reloaded and reload them when it's needed
         self.exchange.reload_markets()
 
+
         self.update_closed_trades_without_assigned_fees()
 
         # Query trades from persistence layer
         trades = Trade.get_open_trades()
-
-        self.active_pair_whitelist = self._refresh_active_whitelist(trades)
-
+        if (datetime.now()-self.last_time_updated_whitelist) > timedelta(minutes=30):
+            self.last_time_updated_whitelist=datetime.now()
+            self.active_pair_whitelist = self._refresh_active_whitelist(trades)
+            self.exchange.update_whitelist(self.active_pair_whitelist)
+            self.strategy.refresh_latest_ohlcv(self.active_pair_whitelist)
         # Refreshing candles
         self.dataprovider.refresh(self.pairlists.create_pair_list(self.active_pair_whitelist),
                                   self.strategy.informative_pairs())
-
+ 
         strategy_safe_wrapper(self.strategy.bot_loop_start, supress_error=True)()
-
+ 
         self.strategy.analyze(self.active_pair_whitelist)
 
         with self._sell_lock:
@@ -183,11 +187,13 @@ class FreqtradeBot(LoggingMixin):
         with self._sell_lock:
             trades = Trade.get_open_trades()
             # First process current opened trades (positions)
+
             self.exit_positions(trades)
+       
 
         # Then looking for buy opportunities
         if self.get_free_open_trades():
-            self.enter_positions()
+            self.enter_positions(trades)
 
         Trade.query.session.flush()
 
@@ -355,7 +361,7 @@ class FreqtradeBot(LoggingMixin):
 # BUY / enter positions / open trades logic and methods
 #
 
-    def enter_positions(self) -> int:
+    def enter_positions(self, trades: List[Any]) -> int:
         """
         Tries to execute buy orders for new trades (positions)
         """
@@ -387,7 +393,12 @@ class FreqtradeBot(LoggingMixin):
         # Create entity and execute trade for each pair from whitelist
         for pair in whitelist:
             try:
+                #logger.info("Check sell." )
+ 
+                
                 trades_created += self.create_trade(pair)
+                self.exit_positions(trades)
+                
             except DependencyException as exception:
                 logger.warning('Unable to create trade for %s: %s', pair, exception)
 
@@ -425,8 +436,8 @@ class FreqtradeBot(LoggingMixin):
                     f"Orderbook: {order_book}"
                  )
                 raise PricingError from e
-            logger.info(f"Buy price from orderbook {bid_strategy['price_side'].capitalize()} side "
-                        f"- top {order_book_top} order book buy rate {rate_from_l2:.8f}")
+            #logger.info(f"Buy price from orderbook {bid_strategy['price_side'].capitalize()} side "
+            #            f"- top {order_book_top} order book buy rate {rate_from_l2:.8f}")
             used_rate = rate_from_l2
         else:
             logger.info(f"Using Last {bid_strategy['price_side'].capitalize()} / Last Price")
@@ -480,8 +491,8 @@ class FreqtradeBot(LoggingMixin):
                 logger.debug(f"Stake amount is 0, ignoring possible trade for {pair}.")
                 return False
 
-            logger.info(f"Buy signal found: about create a new trade for {pair} with stake_amount: "
-                        f"{stake_amount} ...")
+            #logger.info(f"Buy signal found: about create a new trade for {pair} with stake_amount: "
+            #            f"{stake_amount} ...")
 
             bid_check_dom = self.config.get('bid_strategy', {}).get('check_depth_of_market', {})
             if ((bid_check_dom.get('enabled', False)) and

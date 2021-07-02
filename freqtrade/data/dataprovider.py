@@ -20,7 +20,7 @@ from freqtrade.state import RunMode
 logger = logging.getLogger(__name__)
 
 NO_EXCHANGE_EXCEPTION = 'Exchange is not available to DataProvider.'
-MAX_DATAFRAME_CANDLES = 1000
+MAX_DATAFRAME_CANDLES = 100
 
 
 class DataProvider:

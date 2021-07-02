@@ -124,8 +124,8 @@ class Wallets:
                 self._update_live()
             else:
                 self._update_dry()
-            if self._log:
-                logger.info('Wallets synced.')
+            #if self._log:
+                #logger.info('Wallets synced.')
             self._last_wallet_refresh = arrow.utcnow().int_timestamp
 
     def get_all_balances(self) -> Dict[str, Any]:

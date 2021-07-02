@@ -116,6 +116,8 @@ CONF_SCHEMA = {
             'type': 'number', 'minimum': 0.0, 'maximum': 1.0, 'default': 0.5
         },
         'fiat_display_currency': {'type': 'string', 'enum': SUPPORTED_FIAT},
+        'ob_stream': {'type': 'boolean'},
+
         'dry_run': {'type': 'boolean'},
         'dry_run_wallet': {'type': 'number', 'default': DRY_RUN_WALLET},
         'cancel_open_orders_on_exit': {'type': 'boolean', 'default': False},

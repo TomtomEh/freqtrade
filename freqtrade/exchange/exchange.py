@@ -336,7 +336,8 @@ class Exchange:
             self._last_markets_refresh = arrow.utcnow().int_timestamp
         except ccxt.BaseError:
             logger.exception("Could not reload markets.")
-
+    def update_whitelist(self, pairs: List[str]) -> None:
+        pass
     def validate_stakecurrency(self, stake_currency: str) -> None:
         """
         Checks stake-currency against available currencies on the exchange.
